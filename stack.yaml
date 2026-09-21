@@ -1,4 +1,4 @@
-resolver: lts-18.28
+resolver: lts-24.59
 packages:
   - "."
 extra-deps: []
@@ -7,6 +7,5 @@ flags:
     lib-Werror: true
 extra-package-dbs: []
 nix:
-  enable: false
   packages:
     - pcre
