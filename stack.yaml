@@ -1,11 +1,14 @@
 resolver: lts-24.59
 packages:
   - "."
-extra-deps: []
+extra-deps:
+  - git: https://github.com/grcsolutions-au/regex-pcre2.git
+    commit: 8afd8c04a79284a217a9745a5a3b53359498c8c0
 flags:
   ua-parser:
     lib-Werror: true
 extra-package-dbs: []
 nix:
   packages:
-    - pcre
+    - pcre2
+    - pkg-config

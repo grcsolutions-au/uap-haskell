@@ -3,7 +3,18 @@
 # For more information, please see the documentation at:
 #   https://docs.haskellstack.org/en/stable/topics/lock_files
 
-packages: []
+packages:
+- completed:
+    commit: 8afd8c04a79284a217a9745a5a3b53359498c8c0
+    git: https://github.com/grcsolutions-au/regex-pcre2.git
+    name: regex-pcre2
+    pantry-tree:
+      sha256: 2ba452e2211a1d5c9ed550d6a08416796f2688041c723a5d60dd9a19243e1a6a
+      size: 743
+    version: 1.0.0.1
+  original:
+    commit: 8afd8c04a79284a217a9745a5a3b53359498c8c0
+    git: https://github.com/grcsolutions-au/regex-pcre2.git
 snapshots:
 - completed:
     sha256: 0f728e30e843d7f00460ad56858b995a3b227fca683659c7df9f2fc3988a3ce1

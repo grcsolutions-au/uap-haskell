@@ -31,6 +31,7 @@ import           Control.DeepSeq
 import           Control.Monad
 import           Data.Aeson
 import           Data.ByteString.Char8 (ByteString)
+import qualified Data.ByteString       as BS
 import           Data.Data
 import           Data.Default
 import           Data.FileEmbed
@@ -41,7 +42,9 @@ import qualified Data.Text             as T
 import qualified Data.Text.Encoding    as T
 import           Data.Yaml
 import           GHC.Generics
-import           Text.Regex.PCRE.Light
+import qualified Text.Regex.Base.RegexLike as RegexLike
+import           Text.Regex.PCRE2.ByteString (Regex)
+import qualified Text.Regex.PCRE2.ByteString as Pcre2
 import           Data.Serialize
 import           Data.Serialize.Text ()
 -------------------------------------------------------------------------------
@@ -70,12 +73,9 @@ parseUA bs = msum $ map go uaParsers
     where
       UAConfig{..} = uaConfig
 
-      go UAParser{..} = either (const Nothing) (fmap normalize . mkRes)
-                      . mapM T.decodeUtf8' =<< match uaRegex bs []
+      go UAParser{..} = fmap normalize . mkRes $ match uaRegex bs
         where
           normalize (UAResult f v1 v2 v3) = UAResult f (normalizeMaybeText v1) (normalizeMaybeText v2) (normalizeMaybeText v3)
-          normalizeMaybeText (Just "") = Nothing
-          normalizeMaybeText x         = x
           mkRes caps@(_:f:v1:v2:v3:_) = Just $ UAResult (repF caps f) (repV1 caps (Just v1)) (repV2 caps (Just v2)) (repV3 caps (Just v3))
           mkRes caps@[_,f,v1,v2]      = Just $ UAResult (repF caps f) (repV1 caps (Just v1)) (repV2 caps (Just v2)) (repV3 caps Nothing)
           mkRes caps@[_,f,v1]         = Just $ UAResult (repF caps f) (repV1 caps (Just v1)) (repV2 caps Nothing) (repV3 caps Nothing)
@@ -130,16 +130,16 @@ parseOS bs = msum $ map go osParsers
     where
       UAConfig{..} = uaConfig
 
-      go OSParser{..} = either (const Nothing) mkRes
-                      . mapM T.decodeUtf8' =<< match osRegex bs []
+      go OSParser{..} = fmap normalize . mkRes $ match osRegex bs
          where
+         normalize (OSResult f v1 v2 v3 v4) = OSResult f (normalizeMaybeText v1) (normalizeMaybeText v2) (normalizeMaybeText v3) (normalizeMaybeText v4)
          mkRes caps@(_:f:v1:v2:v3:v4:_) = Just $ OSResult (repF caps f) (repV1 caps (Just v1)) (repV2 caps (Just v2)) (repV3 caps (Just v3)) (repV4 caps (Just v4))
          mkRes caps@[_,f,v1,v2,v3]      = Just $ OSResult (repF caps f) (repV1 caps (Just v1)) (repV2 caps (Just v2)) (repV3 caps (Just v3)) (repV4 caps Nothing)
          mkRes caps@[_,f,v1,v2]         = Just $ OSResult (repF caps f) (repV1 caps (Just v1)) (repV2 caps (Just v2)) (repV3 caps Nothing) (repV4 caps Nothing)
          mkRes caps@[_,f,v1]            = Just $ OSResult (repF caps f) (repV1 caps (Just v1)) (repV2 caps Nothing) (repV3 caps Nothing) (repV4 caps Nothing)
          mkRes caps@[_,f]               = Just $ OSResult (repF caps f) (repV1 caps Nothing) (repV2 caps Nothing) (repV3 caps Nothing) (repV4 caps Nothing)
          mkRes caps@[f]                 = Just $ OSResult (repF caps f) (repV1 caps Nothing) (repV2 caps Nothing) (repV3 caps Nothing) (repV4 caps Nothing)
-         mkRes _                   = Nothing
+         mkRes _                 = Nothing
 
          repF caps x = maybe x (makeReplacements caps) osFamRep
 
@@ -157,6 +157,10 @@ data OSResult = OSResult {
     , osrV3     :: Maybe Text
     , osrV4     :: Maybe Text
     } deriving (Show,Read,Eq,Typeable,Data,Generic,NFData,Serialize)
+
+normalizeMaybeText :: Maybe Text -> Maybe Text
+normalizeMaybeText (Just "") = Nothing
+normalizeMaybeText x         = x
 
 instance Default OSResult where
     def = OSResult "Other" Nothing Nothing Nothing Nothing
@@ -185,8 +189,7 @@ parseDev bs = msum $ map go devParsers
     where
       UAConfig{..} = uaConfig
 
-      go DevParser{..} = either (const Nothing) mkRes
-                       . mapM T.decodeUtf8' =<< match devRegex bs []
+      go DevParser{..} = mkRes $ match devRegex bs
         where
           mkRes caps@(_:f:b:m:_) = Just $ mkDR (repF caps f) (repBrand caps (Just b)) (repModel caps (Just m))
           mkRes caps@[_,f,b]   = Just $ mkDR (repF caps f) (repBrand caps (Just b)) (repModel caps Nothing)
@@ -254,7 +257,7 @@ data UAConfig = UAConfig {
       uaParsers  :: [UAParser]
     , osParsers  :: [OSParser]
     , devParsers :: [DevParser]
-    } deriving (Eq,Show)
+    }
 
 
 -------------------------------------------------------------------------------
@@ -264,7 +267,7 @@ data UAParser = UAParser {
     , uaV1Rep  :: Maybe Text
     , uaV2Rep  :: Maybe Text
     , uaV3Rep  :: Maybe Text
-    } deriving (Eq,Show)
+    }
 
 
 -------------------------------------------------------------------------------
@@ -275,7 +278,7 @@ data OSParser = OSParser {
     , osRep2   :: Maybe Text
     , osRep3   :: Maybe Text
     , osRep4   :: Maybe Text
-    } deriving (Eq,Show)
+    }
 
 
 -------------------------------------------------------------------------------
@@ -284,19 +287,37 @@ data DevParser = DevParser {
     , devFamRep   :: Maybe Text
     , devBrandRep :: Maybe Text
     , devModelRep :: Maybe Text
-    } deriving (Eq,Show)
+    }
 
 
 -------------------------------------------------------------------------------
 parseRegex :: Object -> Parser Regex
 parseRegex v = do
-  pat <- v .: "regex"
-  flag <- v .:? "regex_flag" :: Parser (Maybe Text)
-  let flags = case flag of
-                Just "i" -> [caseless]
-                _        -> []
-  return (compile (T.encodeUtf8 pat) flags)
+    pat <- v .: "regex"
+    flag <- v .:? "regex_flag" :: Parser (Maybe Text)
+    -- 'Pcre2.compBlank' and 'Pcre2.matchBlank' just mean no options.
+    -- They're basically 'mempty'. Nothing to do with whitespace or "blanks".
+    let options = case flag of
+          Just "i" -> Pcre2.compCaseless
+          _        -> Pcre2.compBlank
+    return (RegexLike.makeRegexOpts options Pcre2.matchBlank (T.encodeUtf8 pat))
 
+match :: Regex -> ByteString -> [Text]
+match regex bs =
+    case BS.null whole of
+      -- There are two ways this function returns []
+      -- 1. There's no match OR
+      -- 2. There is a match but either the whole match or the submatches 
+      --    are not valid UTF-8
+      -- We don't actually distingish between these two cases in the interface
+      -- of this library, so there's no need to distinguish them here either.
+      True  -> []
+      False -> fromMaybe [] $ mapM maybeUtf8 (whole : captures)
+    where
+      (_, whole, _, captures) =
+        RegexLike.match regex bs :: (ByteString, ByteString, ByteString, [ByteString])
+      maybeUtf8 :: ByteString -> Maybe Text
+      maybeUtf8 = either (const Nothing) Just . T.decodeUtf8'
 
 -------------------------------------------------------------------------------
 instance FromJSON UAConfig where
